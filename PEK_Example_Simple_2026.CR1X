@@ -1,0 +1,33 @@
+'CR1000X Series Datalogger
+'Simple little banger to show where the code to change the encryption lives and demo what happens in the logger. 
+
+'Date:20260401
+'Program author: Polish Thunder (LZ)
+
+'Declare Public Variables
+Public BevyCount 'number of bevies you owe LZ for the assistance... 
+Public PTemp, Batt_volt
+
+'Define Data Tables
+DataTable (Test,1,-1) 'Set table size to # of records, or -1 to autoallocate.
+	DataInterval (0,60,Sec,10)
+	Minimum (1,batt_volt,FP2,False,False)
+	Sample (1,PTemp,FP2)
+EndTable
+
+'Main Program
+BeginProg
+
+  'Code to change the default PEK to SSWSF standard. 
+  '***These lines of code MUST be be between BeginProg and the main Scan***
+  SetSetting("PakBusTCPPassword","")
+  SetSetting("PakBusEncryptionKey","Winston$now_84!")
+  
+	Scan (10,Sec,0,0)
+		PanelTemp (PTemp,15000)
+		Battery (Batt_volt)
+    BevyCount = BevyCount+1
+		CallTable Test
+	NextScan
+EndProg
+
