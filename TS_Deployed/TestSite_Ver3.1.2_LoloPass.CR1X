@@ -1,0 +1,1426 @@
+'CR1000X and CR1000Xe Series Datalogger
+'Program Name: TestSite_Ver_3 - Test Site Base Framework Version 3
+'Program author: Lucas Zukiewicz
+'Latest Revision: Ver 3.1.2
+'Latest Revision Date: 20260323
+
+
+'*********************************************************************************
+'Declare Constants
+'*********************************************************************************
+'TELEMETRY SETUP CONSTANTS
+ConstTable (ConstSetup,0)
+  Const HasBaro As Boolean = True
+  #If HasBaro
+    Const Elevation_ft = 5280
+  #EndIf
+  Const HasStevens As Boolean = True
+  #If HasStevens
+    Const NumStevens = 3
+  #EndIf
+  Const HasAcclima As Boolean = True
+  #If HasAcclima
+    Const NumAcclima = 3
+  #EndIf
+  Const HasSnowTemp As Boolean = True
+  #If HasSnowTemp
+    Const NumSnowTemp = 18 '18 for 3.4m cable, 28 for 5.4m cable
+  #EndIf
+  Const HasLluft As Boolean = False
+  Const HasGeonor As Boolean = False
+  #If HasGeonor
+    Const Geonor_Sensor1_A As Double = 0.0290991R ' Sensor 1 SN 97221
+    Const Geonor_Sensor1_B As Double = 0.0000158571R
+    Const Geonor_Sensor1_F0 = 1108.6
+    Const Geonor_Sensor2_A As Double = 0.0295759R ' Sensor 2 SN 97321
+    Const Geonor_Sensor2_B As Double = 0.0000157010R
+    Const Geonor_Sensor2_F0 = 1119.6
+  #EndIf
+  Const HasRadarPCP As Boolean = False
+  Const XtraRad As Boolean = False '2nd Net Rad Sensor
+  Const XtraDeep As Boolean = False '2nd Sommer US9 Sensor
+  Const FastSlow = 10 'Seconds between Faster Slow Sequence Scans. Modded to test SDI-12 Response
+  'GOES Variables
+  Const GOES As Boolean = True  ' true if using GOES, false if not
+  #If GOES
+    Const GOESID = "5DA25306" 'Enter the GoesID number / platform ID.
+    Const PTXChannel = "304"   'Enter the primary transmit channel assigned to the GOES ID
+    Const PTXTime = "00:09:10"   'Enter the primary transmit time assigned to the GOES ID. The format for this is "00:00:00".Example: 00:58:10 for a transmit 58 mins and 10 secs after the hour
+    Const PTXSatType = "1"   'Enter 0 for 300 baud, 1 for 1200 baud
+    Const PTXPwrLvl = "14.00"   'Set the power level based on which antenna is used.1.25 for Directional Yagi, 7 for Omnidirectional (FTS or Sutron 2:1).
+    Const RTXChannel = "128"   'Random Transmission Channel sets which satellite it reports to. 195 for East, 196 for West
+    Const Num_of_Hours_TX = 5   'Set the number of hours of data to be transmitted per hour
+    Const LocTimeOffset = "-480"
+    Const ComPort = ComME  'This is the setup for an SC105 with the port programmed to ComME vs SDC6/7
+    Const Count = 16 'number of radio setup commands
+    Const RTXSatType = "1"   'Enter 0 for 300 baud, 1 for 1200 baud
+    Const RTXPwrLvl = "14.00"  'Set the power level based on which antenna is used.1.25 for Directional Yagi, 7 for Omnidirectional (FTS or Sutron 2:1).
+  #EndIf
+EndConstTable
+
+Const AutoTimeConstraint_Min As Long = 2 ' time in minutes
+Const AutoTimeUpdateInterval As Long = 129600 ' time in minutes. Set for every 3 months (90 days) 129600
+
+'*********************************************************************************
+'Declare Public Variables
+'*********************************************************************************
+'VARIABLES FOR SENSOR OR PROGRAM CONTROLS
+Public ONSITE_CONTROLS As String *50
+Public FirstHour As Boolean
+Public FastUpdates As Boolean
+#If GOES
+  Public setLoggerTime As Boolean = False
+#EndIf
+'SENSOR VARIABLES
+Public MET_SENSORS As String *50
+
+'ST300 VARIABLES
+Public PRT_TempC
+Dim PRT_Rs_Ro
+
+'VAISALA HMP155A VARIABLES
+Public HMP155_TempC, HMP155_RH
+' Variables for Alternative RH Hourly Average Calculation
+Public RHHourlyAverage As Float
+Dim rhMeasCount As Long = 0
+Dim vaporPressureTotal As Float
+Dim satVaporPressureTotal As Float
+
+
+'APOGEE SN500-SS NET RADIOMETER VARIABLES (UnHeated)
+Public Net(4)
+Alias Net(1) = Incoming_SW
+Alias Net(2) = Outgoing_SW
+Alias Net(3) = Incoming_LW
+Alias Net(4) = Outgoing_LW
+
+#If XtraRad
+  'APOGEE SN500-SS NET RADIOMETER VARIABLES (Heated)
+  Public Net_2(4)
+  Alias Net_2(1) = Incoming_SW_2
+  Alias Net_2(2) = Outgoing_SW_2
+  Alias Net_2(3) = Incoming_LW_2
+  Alias Net_2(4) = Outgoing_LW_2
+#EndIf
+
+'Campbell BaroVue Barometric Pressure Sensor
+#If HasBaro
+  Public BaroVUE(3)
+  Alias BaroVUE(1)=BP_mbar
+  Alias BaroVUE(2)=BP_Temp
+  Alias BaroVUE(3)=BV_Qua
+  Public Elevation_m
+  Public Elevation_Offset
+#EndIf
+
+'RM YOUNG 5108-45 VARIABLES
+Public Wind_mph, Wind_Dir
+
+'SOMMER USH-9 SNOW DEPTH SENSOR VARIABLES
+Public SNOW_DEPTH_SENSORS As String *50
+Dim SommerSDString As String
+Dim SommerOut(9)
+Public USH9Depth,USH9TempC
+
+#If XtraDeep
+  'SOMMER USH-9 SNOW DEPTH SENSOR VARIABLES
+  Dim SommerSDString2 As String
+  Dim SommerOut2(9)
+  Public USH9Depth2,USH9TempC2
+#EndIf
+
+'BEADEDSTREAM DTC SNOW TEMP CABLE (3M)
+'Constants and Public Variables for Beaded Stream Cable
+' Sensor Specific Variables
+#If HasSnowTemp
+  Public SNOW_TEMP_SENSORS As String *50
+  Public dts_temps(NumSnowTemp)
+  #If NumSnowTemp = 18
+    Alias dts_temps(1) = SnowTemp_320cm
+    Alias dts_temps(2) = SnowTemp_300cm
+    Alias dts_temps(3) = SnowTemp_280cm
+    Alias dts_temps(4) = SnowTemp_260cm
+    Alias dts_temps(5) = SnowTemp_240cm
+    Alias dts_temps(6) = SnowTemp_220cm
+    Alias dts_temps(7) = SnowTemp_200cm
+    Alias dts_temps(8) = SnowTemp_180cm
+    Alias dts_temps(9) = SnowTemp_160cm
+    Alias dts_temps(10) = SnowTemp_140cm
+    Alias dts_temps(11) = SnowTemp_120cm
+    Alias dts_temps(12) = SnowTemp_100cm
+    Alias dts_temps(13) = SnowTemp_80cm
+    Alias dts_temps(14) = SnowTemp_60cm
+    Alias dts_temps(15) = SnowTemp_40cm
+    Alias dts_temps(16) = SnowTemp_20cm
+    Alias dts_temps(17) = SnowTemp_0cm
+    Alias dts_temps(18) = SnowTemp_G20cm
+  #EndIf
+  #If NumSnowTemp = 28
+    Alias dts_temps(1) = SnowTemp_520cm
+    Alias dts_temps(2) = SnowTemp_500cm
+    Alias dts_temps(3) = SnowTemp_480cm
+    Alias dts_temps(4) = SnowTemp_460cm
+    Alias dts_temps(5) = SnowTemp_440cm
+    Alias dts_temps(6) = SnowTemp_420cm
+    Alias dts_temps(7) = SnowTemp_400cm
+    Alias dts_temps(8) = SnowTemp_380cm
+    Alias dts_temps(9) = SnowTemp_360cm
+    Alias dts_temps(10) = SnowTemp_340cm
+    Alias dts_temps(11) = SnowTemp_320cm
+    Alias dts_temps(12) = SnowTemp_300cm
+    Alias dts_temps(13) = SnowTemp_280cm
+    Alias dts_temps(14) = SnowTemp_260cm
+    Alias dts_temps(15) = SnowTemp_240cm
+    Alias dts_temps(16) = SnowTemp_220cm
+    Alias dts_temps(17) = SnowTemp_200cm
+    Alias dts_temps(18) = SnowTemp_180cm
+    Alias dts_temps(19) = SnowTemp_160cm
+    Alias dts_temps(20) = SnowTemp_140cm
+    Alias dts_temps(21) = SnowTemp_120cm
+    Alias dts_temps(22) = SnowTemp_100cm
+    Alias dts_temps(23) = SnowTemp_80cm
+    Alias dts_temps(24) = SnowTemp_60cm
+    Alias dts_temps(25) = SnowTemp_40cm
+    Alias dts_temps(26) = SnowTemp_20cm
+    Alias dts_temps(27) = SnowTemp_0cm
+    Alias dts_temps(28) = SnowTemp_G20cm
+  #EndIf
+
+  ' Intermediate Processing Variables
+  Dim modbus_temps(NumSnowTemp) As Long
+  Dim loopincrementer'
+
+  ' set up serial configuration
+  Public modcode  ' results code from serial communication
+  Const modbus_baud = 9600   ' 9600 bits per second
+  Const modbus_address = 1   ' Address of Recite / MLink: 1 to 255
+  Const modbus_function = 4  ' Value 4 == Read Input Registers of modbus device
+  Const modbus_read_start = 2  ' Value 2 == Input Regstier Number 30002, value 1 of DTS String
+  Const modbus_option = 1    ' Value 1 == Modbus 16 bit signed integer
+  ' Value 11 == Modbus 2byte ASCII output
+#EndIf
+
+'STEVENS HYDRAPROBE VARIABLES
+#If HasStevens Then
+  Public SOIL_SENSORS As String *50
+  #If NumStevens >=1 Then
+    Dim SoilsOne As String
+    Public SoilsOneArray(5), SoilMoistureOne, SoilTempOne
+  #EndIf
+  #If NumStevens >=2 Then
+    Dim SoilsTwo As String
+    Public SoilsTwoArray(5), SoilMoistureTwo, SoilTempTwo
+  #EndIf
+  #If NumStevens >=3 Then
+    Dim SoilsThree As String
+    Public SoilsThreeArray(5), SoilMoistureThree, SoilTempThree
+  #EndIf
+#EndIf
+
+'ACCLIMA SOIL SENSOR VARIABLES
+'Variables for the 305N Acclima Sensor (Short Tines)
+#If HasAcclima Then
+  #If NumAcclima >=1 Then
+    Public Acclima_4(5)
+    Alias Acclima_4(1) = Acc_305_VWC_4in
+    Alias Acclima_4(2) = Acc_305_ST_4in
+    Alias Acclima_4(3) = Acc_305_RP_4in
+    Alias Acclima_4(4) = Acc_305_BEC_4in
+    Alias Acclima_4(5) = Acc_305_PWC_4in
+  #EndIf
+  #If NumAcclima >=2 Then
+    Public Acclima_8(5)
+    Alias Acclima_8(1) = Acc_305_VWC_8in
+    Alias Acclima_8(2) = Acc_305_ST_8in
+    Alias Acclima_8(3) = Acc_305_RP_8in
+    Alias Acclima_8(4) = Acc_305_BEC_8in
+    Alias Acclima_8(5) = Acc_305_PWC_8in
+  #EndIf
+  #If NumAcclima >=3 Then
+    Public Acclima_20(5)
+    Alias Acclima_20(1) = Acc_305_VWC_20in
+    Alias Acclima_20(2) = Acc_305_ST_20in
+    Alias Acclima_20(3) = Acc_305_RP_20in
+    Alias Acclima_20(4) = Acc_305_BEC_20in
+    Alias Acclima_20(5) = Acc_305_PWC_20in
+  #EndIf
+#EndIf
+
+Public XTRA_SENSORS As String *50
+
+'Geonor 3000mm Variables
+#If HasGeonor
+  Public GeonorOffset1
+  Public Geonor_Freq1_hz As Float,Geonor_Freq2_hz As Float
+  Dim Geonor_Precip1_cm As Float,Geonor_Precip2_cm As Float
+  Public Geonor_Precip1_in As Float,Geonor_Precip2_in As Float
+  Dim Geonor_Precip_Tot_cm As Float
+  Public Geonor_Precip_Tot_in As Float
+#EndIf
+
+'Lufft WS100 Disdrometer
+#If HasRadarPCP
+  Public RadarResponse(5)
+  Alias RadarResponse(1) = WS100_TotalPCP
+  Alias RadarResponse(2) = WS100_PCPChange
+  Alias RadarResponse(3) = WS100_PCPIn_Hour
+  Alias RadarResponse(4) = WS100_PCPType
+  Alias RadarResponse(5) = WS100_PCP_In_Min
+#EndIf
+
+'Lufft Ventus X VVariables
+#If HasLluft
+  'Dim LluftString As String *50
+  Public Lluft(4) ' Response from R0 Command
+  Public LluftTwo(5) ' Response from R1 Command
+  Alias Lluft(1)=LufftAirTempF ' Virtual Observed
+  Alias Lluft(2)=LluftWindSpeed ' Observed
+  Alias Lluft(3)=LluftMaxSpeed ' 60 Second
+  Alias Lluft(4)=LluftAvgSpeed ' 60 Second
+  Alias LluftTwo(1)= LluftDirection ' Observed
+  Alias LluftTwo(2)= LluftAvgDir ' 60 Seconds
+  Alias LluftTwo(3)= LluftQuality ' 0 to 100
+  Alias LluftTwo(4)= LluftAirPressure ' Virtual
+  Alias LluftTwo(5)= LluftAirDensity ' Virtual
+
+#EndIf
+
+'DATALOGGER RELATED VARIABLES
+Public LOGGER_INFO As String *50, Batt_volt, Logger_IBat, Logger_OSVer As String, Radio_Batt
+Public PakBusEncKey As String *15
+Public PakBusTCPPass As String *15
+
+'GOES RELATED VARIABLES
+#If GOES = True Then
+  'Datalogger and GOES variables
+  Public RADIO_INFO As String *50
+  Public FailSafeStatus As String *25, FailsafeResets
+  Public RadioBuffer As String * 1300
+  Public DataOutLength
+  Units DataOutLength = Bytes
+  Dim TxString As String * 1203 'sum of bytes below. limits the outgoing message size to 1203 bytes.
+  Dim HdrString As String *6 'num_hours/num_channels added to beginning of multi hour message = 6 bytes
+  Public Hour1String As String * 399 'day/time + 131 channels/hour max = 399 bytes
+  Public Hour2String As String * 399 'day/time + 131 channels/hour max = 399 bytes
+  Public Hour3String As String * 399 'day/time + 131 channels/hour max = 399 bytes
+  Public Hour4String As String * 399 'day/time + 131 channels/hour max = 399 bytes
+  Public Hour5String As String * 399 'day/time + 131 channels/hour max = 399 bytes
+  Public NumChannels ' auto calculated below in program based on number of channels/bytes per hour.
+  Public NextTxTime As String *50
+  Public Lst_FwdPwr, Lst_RPwr, Lst_BV_loaded
+  Public MissedTX As String *50,
+  Public LastGPSSync As String * 50
+  Public SCount ' counter for first couple of hours for GOES message
+
+  '*********Additional GOES Variables for Sutron Operation****************************************************
+  'Public RadioSetup As Boolean, SetupResponse(Count) As String * 100, Str(Count) As String * 39, RadioResponse(5) As String *100 ' current command string and response,
+  Public TestTX As Boolean, CheckRadioStats As Boolean, FailsafeReset As Boolean
+  Public SetupResponse(Count) As String * 100,
+  Public SendToSutron As Boolean
+  Public StopXmit As Boolean
+  Dim triggerLoggerTimeSet As Boolean = False
+  Dim Str(Count) As String * 39, RadioResponse(5) As String *100 ' current command string and response
+  Dim GoesStats (20) As String * 80, LoadBuffReply(3) As String, RTXResponse (3) As String *10, GPSStats(5) As String * 80, CRLF As String, FailSafeString(10) As String *25
+  Dim loc, i As Long
+  Dim GoesTimeStamp, TbTime(9), MissedTransmissions, StatsArray(6)
+  'Public StopXmit As Boolean
+#EndIf
+
+
+'*********************************************************************************
+'Data Tables
+'*********************************************************************************
+
+'Main GOES Transmission Table
+DataTable (Tbl99,1,-1)
+  DataInterval (0,60,Min,10)
+  'GROUP 1 BEGINS*****************************************
+  'APOGEE ST300 Metrics
+  #If GOES
+    Sample (1,TbTime(9),FP2)
+    Sample (1,GoesTimeStamp,FP2)
+  #EndIf
+  Sample (1,PRT_TempC,FP2)
+  Maximum (1,PRT_TempC,FP2,FirstHour,False)
+  Minimum (1,PRT_TempC,FP2,FirstHour,False)
+  Average (1,PRT_TempC,FP2,FirstHour)
+  'HMP155 Temp/RH Metrics
+  Sample (1,HMP155_TempC,FP2)
+  Maximum (1,HMP155_TempC,FP2,FirstHour,False)
+  Minimum (1,HMP155_TempC,FP2,FirstHour,False)
+  Average (1,HMP155_TempC,FP2,FirstHour)
+  Average (1,HMP155_RH,FP2,FirstHour)
+  Sample (1, RHHourlyAverage,FP2)
+  'Wind Metrics
+  WindVector (1,Wind_mph,Wind_Dir,FP2,FirstHour,0,0,1)
+  FieldNames ("WindSpeedMean,WindDirMean")
+  Maximum (1,Wind_mph,FP2,FirstHour,False)
+  'Snow Depth Metrics
+  Sample (1,USH9Depth,FP2)
+  Sample (1,USH9TempC,FP2)
+  'GROUP 2 BEGINS*****************************************
+  'SolRad Metrics
+  Average (1,Incoming_SW,FP2,FirstHour)
+  Average (1,Outgoing_SW,FP2,FirstHour)
+  Average (1,Incoming_LW,FP2,FirstHour)
+  Average (1,Outgoing_LW,FP2,FirstHour)
+  'BP Metrics
+  #If HasBaro
+    Sample (1,BP_mbar,FP2)
+  #EndIf
+  'Snow Depth Metrics - USH9 Continuous Mode
+  #If XtraDeep
+    Sample (1,USH9Depth2,FP2)
+    Sample (1,USH9TempC2,FP2)
+  #EndIf
+  'SolRad Metrics - Heated Functionality
+  #If XtraRad
+    Average (1,Incoming_SW_2,FP2,FirstHour)
+    Average (1,Outgoing_SW_2,FP2,FirstHour)
+    Average (1,Incoming_LW_2,FP2,FirstHour)
+    Average (1,Outgoing_LW_2,FP2,FirstHour)
+  #EndIf
+  #If HasLluft ' Include Lluft wind metrics, if present
+    WindVector (1,LluftWindSpeed,LluftDirection,FP2,False,0,0,1)
+    FieldNames ("LufftSpeedMean, LufftDirMean")
+    Maximum (1,LluftWindSpeed,FP2,False,False)
+  #EndIf
+  #If HasGeonor
+    Sample (1,Geonor_Precip_Tot_in,FP2)
+  #EndIf
+  #If HasRadarPCP
+    Sample (5,RadarResponse,FP2)
+  #EndIf
+  'GROUP 3 BEGINS*****************************************
+  'Beaded Stream Metrics
+  #If HasSnowTemp
+    #If NumSnowTemp >= 18
+      Sample (1,SnowTemp_G20cm,FP2)
+      Sample (1,SnowTemp_0cm,FP2)
+      Sample (1,SnowTemp_20cm,FP2)
+      Sample (1,SnowTemp_40cm,FP2)
+      Sample (1,SnowTemp_60cm,FP2)
+      Sample (1,SnowTemp_80cm,FP2)
+      Sample (1,SnowTemp_100cm,FP2)
+      Sample (1,SnowTemp_120cm,FP2)
+      Sample (1,SnowTemp_140cm,FP2)
+      Sample (1,SnowTemp_160cm,FP2)
+      Sample (1,SnowTemp_180cm,FP2)
+      Sample (1,SnowTemp_200cm,FP2)
+      Sample (1,SnowTemp_220cm,FP2)
+      Sample (1,SnowTemp_240cm,FP2)
+      Sample (1,SnowTemp_260cm,FP2)
+      Sample (1,SnowTemp_280cm,FP2)
+      Sample (1,SnowTemp_300cm,FP2)
+      Sample (1,SnowTemp_320cm,FP2)
+    #EndIf
+    #If NumSnowTemp > 18
+      Sample (1,SnowTemp_340cm,FP2)
+      Sample (1,SnowTemp_360cm,FP2)
+      Sample (1,SnowTemp_380cm,FP2)
+      Sample (1,SnowTemp_400cm,FP2)
+      Sample (1,SnowTemp_420cm,FP2)
+      Sample (1,SnowTemp_440cm,FP2)
+      Sample (1,SnowTemp_460cm,FP2)
+      Sample (1,SnowTemp_480cm,FP2)
+      Sample (1,SnowTemp_500cm,FP2)
+      Sample (1,SnowTemp_520cm,FP2)
+    #EndIf
+  #EndIf
+  'GROUP 5 BEGINS*****************************************
+  'Stevens Soil Moisture Metrics
+  #If HasStevens
+    #If NumStevens >=1
+      Sample (1,SoilMoistureOne,FP2)
+      Sample (1,SoilTempOne,FP2)
+    #EndIf
+    #If NumStevens >=2
+      Sample (1,SoilMoistureTwo,FP2)
+      Sample (1,SoilTempTwo,FP2)
+    #EndIf
+    #If NumStevens >=3
+      Sample (1,SoilMoistureThree,FP2)
+      Sample (1,SoilTempThree,FP2)
+    #EndIf
+  #EndIf
+  '305N Acclima Sensor (SNOTEL) Metrics
+  #If HasAcclima
+    Sample(1,Acclima_4(1),FP2)
+    Sample(1,Acclima_4(2),FP2)
+    Sample(1,Acclima_8(1),FP2)
+    Sample(1,Acclima_8(2),FP2)
+    Sample(1,Acclima_20(1),FP2)
+    Sample(1,Acclima_20(2),FP2)
+  #EndIf
+  'GROUP 16 BEGINS*****************************************
+  'Logger Statistics for Diagnostics
+  Sample (1,Batt_volt,FP2)
+  Sample (1,Logger_IBat,FP2)
+  'Radio Statistics for Diagnostics
+  Sample (1,Radio_Batt,FP2)
+EndTable
+
+'GOES Header Table for Multi-Hour Transmissions
+#If GOES = True Then
+  'This is the header format table for the multi hour OpenDCS message
+  DataTable (HdrTable,-1, -1)
+    DataInterval (0,1,Hr,10)
+    Sample(1,Num_of_Hours_TX,FP2)
+    Sample(1,NumChannels,FP2)
+  EndTable
+#EndIf
+
+'*********************************************************************************
+'Define Subroutines
+'*********************************************************************************
+'Subs for sensor commands
+
+Sub RH_Calc
+  'RH calculations and QC checks
+  If HMP155_RH > 100 AND HMP155_RH < 108 Then HMP155_RH = 100
+  If HMP155_RH <= 100 AND HMP155_RH > 0 AND HMP155_TempC < 57 AND  HMP155_TempC > -90 Then
+    satVaporPressureTotal += satVaporPressure(HMP155_TempC)
+    vaporPressureTotal += satVaporPressure * HMP155_RH / 100
+    rhMeasCount += 1
+  EndIf
+  RHHourlyAverage = vaporPressureTotal / satVaporPressureTotal  * 100
+  If IfTime(0,60,min) AND rhMeasCount < 30 Then RHHourlyAverage = NAN 'greater then 30 means at least half of the measurements are valid
+  If IfTime(0,60,min) Then vaporPressureTotal = 0 : satVaporPressureTotal = 0 : rhMeasCount = 0
+EndSub
+
+'Huang J. 2018 A simple accurate formula for calculating saturation vapor pressure of water and ice. J. Appl. Meteorol. Climatol. 57, 1265–1272
+'Low error from -100 to 100 C
+Function satVaporPressure(tempFromRh As Float) As Double
+  Dim doubleTempFromRH As Double
+  Dim waterA As Double = 34.494R
+  Dim waterB As Double = 4924.99R
+  Dim waterC As Double = 237.1R
+  Dim waterD As Double = 105R
+  Dim waterE As Double = 1.57R
+  Dim iceA As Double = 43.494R
+  Dim iceB As Double = 6545.8R
+  Dim iceC As Double = 278R
+  Dim iceD As Double = 868R
+  Dim iceE As Double = 2R
+  Dim saturatedVaperPressure As Double
+  doubleTempFromRH = tempFromRh 'cast to double precession
+  If tempFromRh > 0 Then
+    saturatedVaperPressure = (EXP (waterA - (waterB /(doubleTempFromRH + waterC)))) / ((doubleTempFromRH + waterD)^waterE)
+  Else
+    saturatedVaperPressure = (EXP (iceA - (iceB /(doubleTempFromRH + iceC)))) / ((doubleTempFromRH + iceD)^iceE)
+  EndIf
+  satVaporPressure = saturatedVaperPressure
+EndFunction
+
+Sub NetRad
+  'Build simple SDI-12 Sub for Apogeen SN500-SS Net Radiometer
+  SDI12Recorder (Net(),C3,6,"C!",1.0,0,-1) 'Meausure the Net Radiometer via C5 (SDI-12 1 bus)
+  'SDI12Recorder (Net(),C3,6,"D0!",1.0,0,-1) 'Meausure the Net Radiometer via C5 (SDI-12 1 bus)
+EndSub
+
+#If XtraRad
+  Sub NetRad_2
+    SDI12Recorder (Net_2(),C3,"A","C!",1.0,0,-1) 'Measure the Net Radiometer via C5 (SDI-12 1 bus)
+    'SDI12Recorder (Net_2(),C3,"A","D0!",1.0,0,-1) 'Measure the Net Radiometer via C5 (SDI-12 1 bus)
+  EndSub
+#EndIf
+
+Sub HeatNetRad
+  'Build simple heating logic for Apogee SN500-SS Net Radiometer
+  Public NetHeaterOn As Boolean
+  Public NetHeatHours
+  Public NetHeaterControl(1)
+  If TimeIsBetween (1,152,365,Day) OR TimeIsBetween (274,365,365,Day) AND PRT_TempC < 4.5 AND Batt_volt > 11.8 AND NetHeaterOn = FALSE Then
+    'turns heater power on
+    SDI12Recorder (NetHeaterControl(),C3,"A","XHON!",1.0,0,-1)
+    NetHeaterOn = TRUE
+  EndIf
+  If TimeIsBetween (153,273,365,Day) OR PRT_TempC > 4.5 OR Batt_volt <= 11.8 AND NetHeaterOn = TRUE Then
+    'turns heater power off
+    SDI12Recorder (NetHeaterControl(),C3,"A","XHOFF!",1.0,0,-1)
+    NetHeaterOn = FALSE
+  EndIf
+EndSub
+
+Sub USH9
+  'Build Sub for Sommer snow depth measurement (SDI-12 Adress 7)
+  SDI12Recorder (SommerSDString,C5,7,"C!",1000,0,-1)
+  'SDI12Recorder (SommerSDString,C5,7,"D0!",1000,0,-1)
+  SplitStr (SommerOut(),SommerSDString,"+-",4,0)
+  USH9Depth = SommerOut(3)*0.0393701 ' convert output millimeters to inches
+  USH9TempC = SommerOut(4)
+EndSub
+
+#If XtraDeep
+  Sub USH9_2 'Polls Measurements from Continuosly Operating USH9 Sensor
+    'Build Sub for Sommer snow depth measurement (SDI-12 Adress 8)
+    SDI12Recorder (SommerSDString2,C5,8,"R!",1000,0,-1)
+    SplitStr (SommerOut2(),SommerSDString2,"+-",4,0)
+    USH9Depth2 = SommerOut2(3)*0.0393701 ' convert output millimeters to inches
+    USH9TempC2 = SommerOut2(4)
+  EndSub
+#EndIf
+
+'Build sub for barometric pressure sensor, if present.
+#If HasBaro
+  Sub Baro
+    'BaroVUE10 (SDI-12) Barometric Pressure Sensor measurements 'BV_BP', 'BV_Temp', and 'BV_Qual'
+    SDI12Recorder(BaroVUE(),C3,"5","M!",1,0,-1)
+    Elevation_m = Elevation_ft/3.281 'Convert Elevation in feet to meters
+    Elevation_Offset = 1013.25*(1-(1-(Elevation_m/44307.69231))^5.25328) 'Get pressure elevation offset
+    BP_mbar = BP_mbar + Elevation_Offset 'correct to mean sea level pressure based on elevation entered
+  EndSub
+#EndIf
+
+'Build sub for Beaded Stream if it exists.
+#If HasSnowTemp
+  Sub SnowTemp
+    SerialOpen (ComC7,9600,0,0,50,4) ' Opens Com Port to Modbus 485 Half Duplex Comms to Beaded Stream
+    SerialFlush (ComC7)
+    'Open ComC7 for Beaded Stream Cable MODBUS RS-485 communications at 9600 baud, 8 data bits, no parity, and one stop bit
+    'Modbus code to read the digital temperature cable values. variable modcode = 0 when data is sucessfully retrieved
+    ModbusMaster (modcode,ComC7, modbus_baud, modbus_address ,modbus_function, modbus_temps(),modbus_read_start,NumSnowTemp, 1, 1000,modbus_option)
+    ' convert modbus values to Temperature (Celsius)
+    For loopincrementer = 1 To NumSnowTemp
+      dts_temps(loopincrementer) = modbus_temps(loopincrementer) / 100
+    Next
+    SerialClose (ComC7)
+  EndSub
+#EndIf
+
+'Build Subs for measuring Soil Moisture Sensors
+'Stevens Hydraprobe sub for 3 up to 3 sensors.
+#If HasStevens
+  Sub Soils
+    #If NumStevens >=1 Then
+      SDI12Recorder (SoilsOne,C5,1,"M!",1.0,0,-1) 'measure 8" probe and store values...
+      SplitStr (SoilsOneArray(),SoilsOne,"+",3,4)
+      SoilMoistureOne = SoilsOneArray(1) *100
+      SoilTempOne = SoilsOneArray(3)
+    #EndIf
+    #If NumStevens >=2 Then
+      SDI12Recorder (SoilsTwo,C5,2,"M!",1.0,0,-1) 'measure 8" probe and store values...
+      SplitStr (SoilsTwoArray(),SoilsTwo,"+",3,4)
+      SoilMoistureTwo = SoilsTwoArray(1) *100
+      SoilTempTwo = SoilsTwoArray(3)
+    #EndIf
+    #If NumStevens >=3 Then
+      SDI12Recorder (SoilsThree,C5,3,"M!",1.0,0,-1) 'measure 8" probe and store values...
+      SplitStr (SoilsThreeArray(),SoilsThree,"+",3,4)
+      SoilMoistureThree = SoilsThreeArray(1) *100
+      SoilTempThree = SoilsThreeArray(3)
+    #EndIf
+  EndSub
+#EndIf
+
+'Acclima TDR305N (SNOTEL) sub for 3 up to 3 sensors.
+#If HasAcclima
+  Sub Acclima
+    'All Acclima sensors Blue wire on C5, Red 12V, White G
+    #If NumAcclima >=1
+      'Acclima TDR305N at 4 inches, Address 2, VWC %, SoilTemp C, Relative Permitivity, Bulk Electrical Conductivity, Soil Pore Water EC
+      SDI12Recorder (Acclima_4(),C5,"B","M!",1.0,0,-1)
+    #EndIf
+    #If NumAcclima >=2
+      'Acclima TDR305N at 8 inches, Address 3, VWC %, SoilTemp C, Relative Permitivity, Bulk Electrical Conductivity, Soil Pore Water EC
+      SDI12Recorder (Acclima_8(),C5,"C","M!",1.0,0,-1)
+    #EndIf
+    #If NumAcclima >=3
+      'Acclima TDR305N at 20 inches, Address 4, VWC %, SoilTemp C, Relative Permitivity, Bulk Electrical Conductivity, Soil Pore Water EC
+      SDI12Recorder (Acclima_20(),C5,"D","M!",1.0,0,-1)
+    #EndIf
+  EndSub
+#EndIf
+
+'Lluft Wind Vane Subroutine
+#If HasLluft
+  Sub LluftWind
+    'Measure WS200 Sensor
+    '    SDI12Recorder(LluftString,C3,"W","C!",1,0,-1)
+    '    Delay (2,2,Sec)
+    SDI12Recorder(Lluft(),C3,"W","R0!",1,0,-1)
+    SDI12Recorder(LluftTwo(),C3,"W","R1!",1,0,-1)
+  EndSub
+#EndIf
+
+'Lufft WS100 Subroutine
+#If HasRadarPCP
+  Sub WS100
+    'Measure WS100 Sensor
+    SDI12Recorder (RadarResponse(),C5,"R","C!",1.0,0,-1) 'Measure the Net Radiometer via C5 (SDI-12 1 bus)
+  EndSub
+#EndIf
+
+
+'Build subs for GOES control if on GOES
+#If GOES Then
+  'Function to wake up the Sutron Radio from idle status and establish Comms with Logger.
+  Function Wake_UP_Sutron() As Boolean'establishes comms with radio
+    Dim Prompt As String, loc, i As Long
+    CRLF = CHR(13) & CHR(10) ' this string of characters "^M^J" is equivelent to hitting enter on keyboard in window
+    SerialOpen (ComPort,9600,3,0,620) 'open CR1000X CS I/O port at 9600 baud, in ComME mode(requires SC105 setup for task but works with SC196)
+    SerialFlush(ComPort)'clears buffer
+    For i = 1 To 10 'try 10 times to get sutron to respond through command line
+      SerialOut (ComPort,CRLF,"",0,0)
+      SerialIn (Prompt,ComPort,200,">",15)
+      loc = InStr (1,Prompt,">",2)
+      If loc Then ExitFor 'if the loc var gets data program exits for loop
+    Next i
+    If loc Then Wake_UP_Sutron = true Else Wake_UP_Sutron = false
+  EndSub
+
+  'Sub to setup the GOES radio with values set in constants, and hard-coding.
+  Sub SatLinkSetup
+    Wake_Up_Sutron()
+    For i = 1 To Count Step 1
+      Select i
+      Case 1
+        Str(i) = "Recording=On"
+      Case 2
+        Str(i) = "Local Time Offset=" &LocTimeOffset
+      Case 3
+        Str(i) = "GPS Antenna Detect=Off"
+      Case 4
+        If StopXmit Then
+          Str(i) = "TX1 Enable=Off"
+        Else
+          Str(i) = "TX1 Enable=On"
+        EndIf
+      Case 5
+        Str(i) = "TX1 Scheduled Interval=01:00:00"
+      Case 6
+        Str(i) = "TX1 Scheduled Time="&PTXTime
+      Case 7
+        Str(i) = "TX1 Satellite Type=" & PTXSatType
+      Case 8
+        Str(i) = "TX1 Satellite ID=" & GOESID
+      Case 9
+        Str(i) = "TX1 Channel=" & PTXChannel
+      Case 10
+        Str(i) = "TX1 Power Output=" & PTXPwrLvl
+      Case 11
+        Str(i) = "TX2 Enable=On"
+      Case 12
+        Str(i) = "TX2 Satellite ID=" & GOESID
+      Case 13
+        Str(i) = "TX2 Channel=" & RTXChannel
+      Case 14
+        Str(i) = "TX2 Scheduled Interval=00:00:00"
+      Case 15
+        Str(i) = "TX2 Power Output=" & RTXPwrLvl
+      Case 16
+        Str(i) = "TX2 Satellite Type=0"
+      EndSelect
+      SerialFlush(ComPort)
+      SerialOut (ComPort,Str(i)&CRLF,"",0,0)
+      Delay (1,1,sec)
+      SerialIn (SetupResponse(i),ComPort,100,CHR(3),100)
+      SplitStr (RadioResponse(),SetupResponse(i),"Setup",5,4)
+      SetupResponse(i) = RadioResponse(1)
+    Next i
+  EndSub
+
+  'Sub to read the stats from the last GPS fix
+  Sub GPSStatistics
+    Wake_UP_Sutron()
+    SerialOut (ComPort,"!Status GPS" & CRLF,"",0,0)
+    Delay (1,2,sec)
+    i = 1
+    Do While SerialInChk(ComPort)
+      SerialIn (GPSStats(i),ComPort,100,CHR(13),100)
+      i=i+1
+      If i > 4 Then
+        SerialFlush(ComPort)
+        ExitDo
+      EndIf
+    Loop
+    SerialClose(ComPort)
+    LastGPSSync = GPSStats(3)
+  EndSub
+
+  'Sub to read the stats from the last hourly transmission
+  Sub TXStats
+    Wake_UP_Sutron()
+    SerialOut (ComPort,"!TX1 Status" & CRLF,"",0,0)
+    Delay (1,2,sec)
+    i = 1
+    Do While SerialInChk(ComPort)
+      SerialIn (GoesStats(i),ComPort,100,CHR(13),100)
+      i=i+1
+      If i > 19 Then
+        SerialFlush(ComPort)
+        ExitDo
+      EndIf
+    Loop
+    SerialOut (ComPort,"!FAILSAFE" & CRLF,"",0,0)
+    Delay (1,2,sec)
+    i = 1
+    Do While SerialInChk(ComPort)
+      SerialIn (FailSafeString(i),ComPort,100,CHR(13),100)
+      i=i+1
+      If i > 11 Then
+        SerialFlush(ComPort)
+        ExitDo
+      EndIf
+    Loop
+    SerialClose(ComPort)
+    MissedTX = GoesStats(5)
+    FailSafeStatus = FailSafeString (1)
+    SplitStr (StatsArray(),GoesStats(7),"String",5,0)
+    Lst_BV_loaded = StatsArray(2)
+    'BattPostTx = StatsArray(3)
+    SplitStr (StatsArray(),GoesStats(8),"String",5,0)
+    Lst_FwdPwr = 10 * LOG10(1000*StatsArray(1))
+    Lst_RPwr = StatsArray(2)
+    NextTxTime = GoesStats(3)
+    SplitStr (StatsArray(),GoesStats(5),"String",5,0)
+    MissedTransmissions = StatsArray(1)
+  EndSub
+
+  'Sub to send a random transmission from the site.
+  Sub RandomTX
+    Wake_UP_Sutron()
+    SerialOut (ComPort,"!TX2 TXNOW" & CRLF,"",0,0)
+    Delay (1,2,Sec)
+    i = 1
+    Do While SerialInChk(ComPort)
+      SerialIn (RTXResponse(i),ComPort,100,CHR(13),100)
+      i=i+1
+      If i > 6 Then
+        SerialFlush(ComPort)
+        ExitDo
+      EndIf
+    Loop
+    SerialClose(ComPort)
+  EndSub
+
+  'Sub to send the data to the buffer in the Sutron Radio. This is the primary sub needed for GOES transmissions.
+  Sub LoadBuff
+    Wake_UP_Sutron()
+    SerialOut (ComPort,"!TX1 EXTBUF INSERT"&CHR(13),"",0,0)
+    SerialIn (LoadBuffReply(1),ComPort,1000,CHR(3),100)
+    loc = InStr (1,LoadBuffReply(1),CHR(3),2)
+    If loc Then
+      SerialOut (ComPort,TxString & CHR(3),"",0,0)
+      SerialIn (LoadBuffReply(2),ComPort,1000,CHR(3),100)
+      loc = InStr (1,LoadBuffReply(2),CHR(3),2)
+      If loc Then
+        loc = InStr(1,LoadBuffReply(2),"OK",2)
+        LoadBuffReply(3) = ""
+        LoadBuffReply(3) = LoadBuffReply(3) & "Command Successful"
+      Else
+        LoadBuffReply(3) = "Failure"
+      EndIf
+    Else
+      LoadBuffReply(1) = "Failure"
+    EndIf
+    SerialFlush(ComPort)
+    SerialOut (ComPort,"!TX1 EXTBUF SHOW"&CHR(13),"",0,0)
+    ' Delay (1,1,sec)
+    SerialIn (RadioBuffer,ComPort,1000,CHR(3),100)
+    SerialFlush(ComPort)
+    SerialClose(ComPort)
+  EndSub
+
+  'Sub to reset the failsafe, should it fail.
+  Sub Failsafe
+    Wake_UP_Sutron()
+    SerialOut (ComPort,"!FAILSAFE RESET" & CRLF,"",0,0)
+    Delay (1,2,sec)
+    i = 1
+    Do While SerialInChk(ComPort)
+      SerialIn (GoesStats(i),ComPort,100,CHR(13),100)
+      i=i+1
+      If i > 19 Then
+        SerialFlush(ComPort)
+        ExitDo
+      EndIf
+    Loop
+    SerialOut (ComPort,"!FAILSAFE" & CRLF,"",0,0)
+    Delay (1,2,sec)
+    i = 1
+    Do While SerialInChk(ComPort)
+      SerialIn (FailSafeString(i),ComPort,100,CHR(13),100)
+      i=i+1
+      If i > 11 Then
+        SerialFlush(ComPort)
+        ExitDo
+      EndIf
+    Loop
+    SerialClose(ComPort)
+    Trim (FailSafeString(1))
+    FailSafeStatus = FailSafeString(1)
+  EndSub
+
+  '****************************************************************************************************************************************************
+  'Define Functions
+  '****************************************************************************************************************************************************
+
+  'AutoTime Functions - Logic code and cell component was written in large part by Joel Atwood in the CODCO. GOES code (LZ) is specific to the Sutron SL3-XMTR Radio, but could
+  'be modified for the TX321, if needed.
+
+  Dim timeData As Long
+  DataTable(TimeTable,true,1)
+    TableHide
+    Sample(1,timeData,Nsec)
+  EndTable
+
+  Function addSecToTime(timePointer As Long!, secsToApply As Long)
+    Dim initSecSince1960 As Long
+    Dim startTimeString As String
+    Dim timeStringFinal As String
+    Dim updatedTimeArray(7) As Long = 0
+    startTimeString = !timePointer(1) + "-" + !timePointer(2) + "-" + !timePointer(3) + " " + !timePointer(4) + ":" + !timePointer(5) + ":" + !timePointer(6)
+    initSecSince1960 = SecsSince1990 (startTimeString,4)
+    timeData = initSecSince1960 + secsToApply
+    CallTable TimeTable
+    timeStringFinal = TimeTable.timeData(4,1)
+    SplitStr (updatedTimeArray(1),timeStringFinal,"",6,0)
+    updatedTimeArray() = ABS(updatedTimeArray())
+    Return @updatedTimeArray
+  EndFunction
+
+
+  Function timeArrayDifference(timeArrayPointer1 As Long!, timeArrayPointer2 As Long!)
+    Dim timeArray1SecSince1960 As Long
+    Dim timeArray2SecSince1960 As Long
+    Dim timeArrayString1 As String
+    Dim timeArrayString2 As String
+    timeArrayString1 = !timeArrayPointer1(1) + "-" + !timeArrayPointer1(2) + "-" + !timeArrayPointer1(3) + " " + !timeArrayPointer1(4) + ":" + !timeArrayPointer1(5) + ":" + !timeArrayPointer1(6)
+    timeArrayString2 = !timeArrayPointer2(1) + "-" + !timeArrayPointer2(2) + "-" + !timeArrayPointer2(3) + " " + !timeArrayPointer2(4) + ":" + !timeArrayPointer2(5) + ":" + !timeArrayPointer2(6)
+    timeArray1SecSince1960 = SecsSince1990 (timeArrayString1,4)
+    timeArray2SecSince1960 = SecsSince1990 (timeArrayString2,4)
+    Return timeArray1SecSince1960 - timeArray2SecSince1960
+  EndFunction
+
+  Sub goesSetLoggerClock
+    Dim i As Long
+    Dim loggerTime(9) As Long
+    Dim gpsTime(9) As Long
+    Dim TimeResponse(5) As String
+    Dim gpsTimeDiff As Long = 0
+    Dim finalTimeArrayPointer As Long!
+    Dim ElapsedTime As Long = 0
+    Wake_UP_Sutron()
+    If Wake_UP_Sutron Then
+      SerialOut (ComPort,"!TIME" & CRLF,"",0,0)
+      Timer (1,Sec,2)
+      RealTime (loggerTime(1))
+      Delay (1,2,Sec)
+      i = 1
+      Do While SerialInChk(ComPort)
+        SerialIn (TimeResponse(i),ComPort,100,CHR(13),100)
+        i=i+1
+        If i > 6 Then
+          SerialFlush(ComPort)
+          ExitDo
+        EndIf
+      Loop
+      SerialClose(ComPort)
+      For i = 1 To Len(TimeResponse())
+        If Len(TimeResponse(i)) = 22 Then
+          SplitStr (gpsTime(),TimeResponse(2),"String",6,0)
+          RealTime (LoggerTime(1))
+          gpsTimeDiff = timeArrayDifference(@gpsTime, @LoggerTime)
+          If gpsTimeDiff <> NAN Then
+            If (ABS(gpsTimeDiff) <= AutoTimeConstraint_Min * 60) OR setLoggerTime Then
+              ElapsedTime = Timer (1,Sec,4)
+              finalTimeArrayPointer = addSecToTime(@gpsTime, ElapsedTime)
+              ClockSet(!finalTimeArrayPointer(1))
+            EndIf
+          EndIf
+          ExitFor
+        EndIf
+      Next i
+      Timer (1,Sec,1) 'stop timer
+    EndIf
+  EndSub
+
+#EndIf
+
+'*******************************************************************************************************************************************
+'*******************************************************************************************************************************************
+'Main Program
+'*******************************************************************************************************************************************
+'*******************************************************************************************************************************************
+
+BeginProg
+
+  #If GOES = True
+    Call SatLinkSetup
+'    setLoggerTime = False
+    SCount = 0
+  #EndIf
+
+  SetSetting("PakBusTCPPassword","")
+  SetSetting("PakBusEncryptionKey","")
+ 
+  Logger_OSVer = Status.OSVersion
+  FastUpdates = True
+  NetHeatHours = 0
+
+  'code below (and variables above) only serves to organize the public table for onsite viewing. can be removed if you want to reduce code length.
+  ONSITE_CONTROLS = "****************************************"
+  MET_SENSORS = "****************************************"
+  SNOW_DEPTH_SENSORS = "****************************************"
+  XTRA_SENSORS = "****************************************"
+  #If HasSnowTemp
+    SNOW_TEMP_SENSORS = "****************************************"
+  #EndIf
+  #If HasStevens OR HasAcclima
+    SOIL_SENSORS = "****************************************"
+  #EndIf
+  LOGGER_INFO = "****************************************"
+  #If GOES = True
+    RADIO_INFO = "****************************************"
+  #EndIf
+
+  'Begin Main SCAN @ 10Second Rate
+  Scan (10,Sec,5,0)
+
+  PakBusEncKey = Settings.PakBusEncryptionKey
+  PakBusTCPPass = Settings.PakBusTCPPassword
+  
+    'Turn on fast updates (updates at rate of main scan rate)
+    If FastUpdates
+      If TimeIntoInterval(0,5,Min) Then 'this line of code sets the updates to false after the clock hits 5 minutes. Can be changed to different rates, as desired.
+        FastUpdates = FALSE
+      EndIf
+    EndIf
+
+    'Flag first hour statistics after program load
+    If FirstHour Then
+      If TimeIntoInterval (1,60,Min) Then
+        FirstHour = False
+      EndIf
+    EndIf
+
+    'Power and System Management
+
+    'Turn on SW12_1
+    SW12 (SW12_1,1) 'SW12_1 - 60 seconds and constant power sensors are left on all the time, for now.
+    'Turn on SW12_2
+
+    If TimeIntoInterval (55,60,Min) OR FastUpdates
+      SW12 (SW12_2,1)'Turned on @ 55 mins after the hour for warmup, then off 2 mins after the hour. Can cut this time as needed, may
+      'move some sensors to earlier readings to prevent signal/measurement overlap.
+    EndIf
+    'Turn off SW12_2
+    If TimeIntoInterval (2,60,Min)
+      SW12 (SW12_2,0)
+    EndIf
+
+    'RAPID SCAN Analog Sensors (Wind and Precip)
+    'RM Young 5103 Wind Speed (Analog)
+    PulseCount(Wind_mph,1,P1,5,1,0.2192,0)
+    BrHalf(Wind_Dir,1,mV5000,5,Vx2,1,2500,True,20000,60,355,0)
+    If Wind_Dir>=355 OR Wind_Dir<0 Then Wind_Dir=0
+
+    'Geonor Precipitation Gauge Measurement (1 Sensor Pair Only)
+    'Use the equation below to calculate the precipitation in cm for each sensor.
+    ' P = A (f-f0) + B (f-f0)^2
+    'Insert the A, B, & f0 values for each sensor in the constants table. These values can be found on each sensors calibration sheet.
+    'The A, B, & f0 values are different for each sensor.
+    'Sensor 1 - Pair 1
+    #If HasGeonor
+      PulseCount (Geonor_Freq1_hz,1,C1,3,1,1.0,0)
+      Geonor_Precip1_cm=Geonor_Sensor1_A * (Geonor_Freq1_hz-Geonor_Sensor1_F0)+ Geonor_Sensor1_B * (Geonor_Freq1_hz-Geonor_Sensor1_F0)^2
+      Geonor_Precip1_in=Geonor_Precip1_cm*0.3937
+      'Sensor 2 - Pair 1
+      PulseCount (Geonor_Freq2_hz,1,C2,3,1,1.0,0)
+      Geonor_Precip2_cm=Geonor_Sensor2_A*(Geonor_Freq2_hz-Geonor_Sensor2_F0)+Geonor_Sensor2_B*(Geonor_Freq2_hz-Geonor_Sensor2_F0)^2
+      Geonor_Precip2_in=Geonor_Precip2_cm*0.3937
+      'Calculate the total precip in the gauge by adding together the values from the pair of sensors
+      'Sensor Pair 1
+      Geonor_Precip_Tot_cm=Geonor_Precip1_cm+Geonor_Precip2_cm
+      Geonor_Precip_Tot_in=(Geonor_Precip_Tot_cm*0.3937) - GeonorOffset1
+    #EndIf
+
+    CallTable Tbl99
+
+    '*****************************************************************************
+
+    If TimeIntoInterval (0,60,Sec) OR FastUpdates
+      ' ST-300 PRT Air Temp Sensor (Analog)
+      'Measures ST300 starting on Diff Channel 1. Uses Diff 1 & 2 (SE 1-4) and VX1
+      BrHalf4W(PRT_Rs_Ro,1,mV200,mV200,1,Vx1,1,2100,True,True,0,_60Hz,1,0)
+      'Calculates the PRT temperature using built-in coefficients
+      PRTCalc(PRT_TempC,1,PRT_Rs_Ro,1,1.0,0)
+      CallTable Tbl99
+
+      'HMP155A Temp/RH Sensor (Analog - Constant Power)
+      VoltSe(HMP155_TempC,1,mV1000,9,False,0,60,0.14,-80) 'Measure the PT100 PRT Temp Sensor in RH Head
+      VoltSe(HMP155_RH,1,mV1000,10,False,0,60,0.1,0) 'Measure RH
+      Call RH_Calc
+      CallTable Tbl99
+    EndIf
+
+    '*****************************************************************************
+    #If GOES
+      If TimeIntoInterval (0,60,Min)
+        'COUNTER FOR MULTI HOUR TRANSMISSIONS
+        If SCount < Num_of_Hours_TX Then
+          If TimeIntoInterval (0,60,Min)
+            SCount=SCount+1
+            If SCount >= Num_of_Hours_TX Then
+              SCount = Num_of_Hours_TX
+            EndIf
+          EndIf
+        EndIf
+
+        'GOES Time Stamp Generation (Military Hour)
+        RealTime (TbTime) ' read logger time
+        GoesTimeStamp = TbTime(4) * 100 + TbTime(5)
+
+'        'AUTO_TIME TRIGGERS
+'        If setLoggerTime Then triggerLoggerTimeSet = True 'manual trigger of logger time update without bounds
+'        If IfTime(2,AutoTimeUpdateInterval,min) Then triggerLoggerTimeSet = True 'two mintues after the top of the interval in minutes. For 90 days that is 129600 min
+      EndIf
+    #EndIf
+    '*****************************************************************************
+    If TimeIntoInterval (0,60,Min) OR FastUpdates
+      'Collect Datalogger and Radio Voltages
+      Battery (Batt_volt) 'Measure CR1000X Batt. Voltage
+      VoltSe (Radio_Batt,1,mV5000,16,False,0,60,1.0,0) 'Measure Telemetry System Battery
+      Radio_Batt = (Radio_Batt/100)
+      Logger_IBat=(Status.LithiumBattery) 'Measure CR1000X Internal Batt Voltage
+
+      'Start and reset a daily clock of number of hours the Net Radiometer Heater is running
+      If TimeIntoInterval (0,1,Day)
+        NetHeaterControl = 0
+      EndIf
+    EndIf
+
+    '*****************************************************************************
+    #If GOES Then
+      'GOES Message Processing
+      If TimeIntoInterval (1,60,Min) Then
+        GetRecord (HdrString,HdrTable,1,0)
+        GetRecord (Hour1String,Tbl99,1,0)
+        GetRecord (Hour2String,Tbl99,2,0)
+        GetRecord (Hour3String,Tbl99,3,0)
+        GetRecord (Hour4String,Tbl99,4,0)
+        GetRecord (Hour5String,Tbl99,5,0)
+
+        TxString = HdrString + Hour1String + Hour2String + Hour3String + Hour4String + Hour5String
+        DataOutLength = Len(TxString)
+
+        'Code to handle the first couple of hours when the total message length isnt correct.
+        If SCount < Num_of_Hours_TX Then
+          NumChannels = DataOutLength
+          NumChannels = NumChannels - 6 'eliminates the two header characters from the calculation.
+          NumChannels = NumChannels - (SCount * 6) ' this gets rid of the daily, and hourly timestamps from the TX bytes
+          NumChannels = NumChannels / SCount ' divide the number of bytes by the number of hours traqnsmitted
+          NumChannels = NumChannels / 3 ' divide by 3 (bytes per channel) to get the number of channels transmitted.
+          CallTable HdrTable
+        EndIf
+
+        'Code to calculate the number of channels when the message is more "mature".
+        If SCount >= Num_of_Hours_TX Then
+          NumChannels = DataOutLength
+          NumChannels = NumChannels - 6 'eliminates the two header characters from the calculation.
+          NumChannels = NumChannels -(Num_of_Hours_TX * 6) ' this gets rid of the daily, and hourly timestamps from the TX bytes
+          NumChannels = NumChannels / Num_of_Hours_TX ' divide the number of bytes by the number of hours traqnsmitted
+          NumChannels = NumChannels / 3 ' divide by 3 (bytes per channel) to get the number of channels transmitted.
+          CallTable HdrTable
+        EndIf
+
+        SendToSutron = True
+        If SendToSutron Then
+          Call loadbuff
+          SendToSutron = false
+        EndIf
+      EndIf
+    #EndIf
+
+    'Call Data Tables @ Main Scan Rate
+
+    CallTable Tbl99 'call table for all hourly data
+    #If GOES Then
+      CallTable HdrTable
+    #EndIf
+
+  NextScan
+
+  '*********************************************************************************
+  'Slow Sequence 1. To measure faster responsing sensors every hour. Measured on SDI-12 Bus 1 via Com3 (C5)
+  '*********************************************************************************
+  SlowSequence
+  Scan(FastSlow,Sec,0,0)
+
+    'Call Apogee SN500 Net Radiometer Sub
+    Call NetRad
+    #If XtraRad Then
+    Call NetRad_2
+    #EndIf
+    'Call Baro Sub
+    #If HasBaro
+      Call Baro
+    #EndIf
+    #If HasLluft
+      Call LluftWind
+    #EndIf
+    CallTable Tbl99
+  NextScan
+
+
+  '*********************************************************************************
+  'Slow Sequence 2. To measure slower responsing sensors every hour. Measured on SDI-12 Bus 2 via Com5 (C5-SDI12) and C7/C8 (Modbus RS485)
+  '*********************************************************************************
+  SlowSequence
+  Scan(60,Sec,0,0)
+    If TimeIntoInterval (0,60,Min) OR FastUpdates
+      #If HasSnowTemp
+        Call SnowTemp
+      #EndIf
+      'Call WS 100 Radar Precip
+      #If HasRadarPCP
+        Call WS100
+      #EndIf
+      'Call USH9_2 Sub. Query of Onboard Measurements
+      #If XtraDeep
+      Call USH9_2
+      #EndIf
+      Delay (0,10,Sec)
+      'Call USH9 Sub. 8 Seconds.
+      Call USH9
+      'Call Stevens Sub. 3 Seconds.
+      #If HasStevens
+        Call Soils
+      #EndIf
+      'Call Acclima Sub. 3 Seconds.
+      #If HasAcclima
+        Call Acclima
+      #EndIf
+      'Call Beaded Stream Sub. <1 Second.
+      #If HasSnowTemp
+        Call SnowTemp
+      #EndIf
+      Call HeatNetRad
+      'Call Net Radiometer Heater Loop
+      If NetHeaterControl Then
+        NetHeatHours = NetHeatHours + 1
+      EndIf
+      'Call Beaded Stream Sub. <1 Second.
+      CallTable Tbl99
+    EndIf
+
+
+  NextScan
+
+  '*******************************************************************************
+  'Slow Sequence 3. To Configure, Send Data To, And Receive Data from the Sutron Satlink-3 XMTR Radio******************
+  'The statements below are used to trigger different components of the GOES Radio Setup. The timing of the subroutines can be altered according
+  'to how you want the values to come in, and the daily setup of the radio can be disabled, if desired by removing the code at the end.
+  '*******************************************************************************
+  #If GOES = True Then
+    SlowSequence
+    Scan (60,Sec,3,0)
+
+      'Trigger for the Test Transmit Subroutine
+      If TestTX = True Then
+        Call RandomTX
+        TestTX = False
+      EndIf
+
+      'Trigger for the Transmit Stats and GPS Stats Subroutines.
+      If TimeIntoInterval(58,60,min) Then CheckRadioStats = True
+      If CheckRadioStats = True Then
+        Call TXStats
+        Call GPSStatistics
+        CheckRadioStats = False
+      EndIf
+
+      'Trigger to reset the Failsafe if it is found to be tripped.
+      If FailSafeStatus = "Failsafe is TRIPPED" Then FailsafeReset = True
+      If FailsafeReset = True
+        FailsafeResets = FailsafeResets + 1
+        Call Failsafe
+        FailsafeReset = False
+      EndIf
+
+      'Trigger to sync the datalogger clock with the Sutron GPS units time. Only changes if threshold set in constants is exceeded.
+      If triggerLoggerTimeSet Then
+        Call goesSetLoggerClock
+        triggerLoggerTimeSet = False
+        setLoggerTime = False
+      EndIf
+
+    NextScan
+  #EndIf
+
+EndProg
+
+
+'Sensor Wiring Diagram
+'****************************************************************************************************************************************************
+'ST-300 PRT
+'White     --> Diff Chan 1 H     		SE1
+'Black     --> Diff Chan 1 L     		SE2
+'Green     --> Diff Chan 2 H     		SE3
+'Blue      --> Diff Chan 2 L     		SE4
+'Yellow    --> Analog Ground     	AG
+'Shield    --> Shield            		AG
+'Red       --> Excitation        		VX1
+
+'RM Young 5103 (Campbell Sci Wiring)
+'***RM Young Factory 5103 Wiring Switches to Blue (AG) and White (VX2). Rest Remain.
+'Blue    --> Direction Excitation   	VX2
+'Green   --> Direction Signal       	SE5
+'White   --> Signal Ground          	AG
+'Red     --> Speed Signal           	P1
+'Black & Clear  -->                 		AG
+
+'HMP155A Temp/RH Sensor in RAD14 Shield
+'Yellow  --> Temp Signal        		SE9
+'Blue    --> RH Signal          		SE10
+'White   --> Signal Ref         		AG
+'Black   --> Signal Gnd         		AG
+'Clear   --> Shield             		AG
+'Red     --> 12V                		12V Bus
+
+'Lluft WS200 Ventus (SDI-12 Address W)
+'Pink    --> Unused
+'Yellow  --> SDI12 Data Line (or UMB RS485B) 	C3
+'Red  & Blue   --> SDI12 Signal Ground		G (Via G1 Bus)
+'Grey    --> Unused
+'Green   --> Unused (UMB RS485A)
+'White   --> Power Ground       			  G (Via 24V G3 Bus, G3, or Regulator 24V-)
+'Brown   --> 24V                				24V (Via 24V Bus +, or Regulator 24V+)
+
+'CAMPBELL SCIENTIFIC BAROVUE 10 BAROMETRIC PRESSURE SENSOR (SDI-12 Address 5)
+'White   -->SDI-12 signal       	C3 (Via SDI-12 1 Bus)
+'Red     -->Power 12V          	 SW12_1 Constant (Via SW12_1 Bus)
+'Black   --->Power Ground       G (Via G1 Bus)
+
+'APOGEE SN500 NET RADIOMETER 1 (SDI-12 Address 6)
+'White   --> SDI12 Signal        	C3 (SDI-12 Bus)
+'Black   --> Ground             	G1 (Via G1 Bus)
+'Red     --> 12V                	SW12_1 Constant (Via SW12_1 Bus)
+'Clear   --> Shield ground      	G1 (Via G1 Bus)
+
+'APOGEE SN500 NET RADIOMETER 2 - Heated (SDI-12 Address A)
+'White   --> SDI12 Signal       C3 (SDI-12 1 Bus)
+'Black   --> Ground             G (Via G1 Bus)
+'Red     --> 12V                SW12_1 Constant (Via SW12_1 Bus)
+'Clear   --> Shield ground      G1 (Via G1 Bus)
+
+'SOMMER USH9 SNOW DEPTH SENSOR 1 (SDI-12 Address 7)
+'Pink    --> SDI12 Signal       C5 (Via SDI-12 Bus)
+'Brown   --> 12V                SW-12_2 (60 Min Switch - Via SDI-12 Bus)
+'White   --> Ground             G (Via SDI-12 G Bus -> From G2 Bus)
+
+'SOMMER USH9 SNOW DEPTH SENSOR 2 - Internal Readings (SDI-12 Address 8)
+'Pink    --> SDI12 Signal       C5 (Via SDI-12 Bus 2)
+'Brown   --> 12V                SW-12_1 (Constant On - Via SW12_1 Bus)
+'White   --> Ground             G (Via SDI-12 G Bus -> From G2 Bus)
+
+'BEADED STREAM TEMPERATURE CABLE (Modbus RS485)
+'Red     --> 12V               SW-12_2 (Via SW12_2 Bus)
+'Black   --> Ground            G (Via G2 Bus )
+'Yellow   --> RS485A           C7 (Via RS-485 A Bus)
+'Green  --> RS485B             C8 (Via RS485 B Bus ->)
+
+'STEVENS HYDRAPROBE II SM/ST (SDI-12 Address 1-4)
+'Blue    --> SDI12 Signal      C5 (Via SDI-12_2 Bus in Lower Box)
+'Red     --> 12V               SW-12_2 (Via SW12_2 Bus in Lower Box)
+'Black   --> Ground            G2 - (Via G2 Bus in Lower Box)
+
+'ACCLIMA 305N SOIL MOISTURE SENSOR (SDI12 Address B-D)
+'Blue    --> SDI12 Signal      C5 (Via SDI-12 Bus in Lower Box)
+'Red     --> 12V               SW12_2 (Via SW12_2 Bus in Lower Box)
+'White   --> Ground            G2(Via G2 Bus in Lower Box)
+
+'GEONOR 3000mm WIRING (Measured as Pulse via C1 & C2)
+'Geonor 3000mm Gauge (Signal Converter to CR1000Xe)
+'Red     --> C (on block - jumpered)  SW12_1 Constant (Via SW12_1 Bus)
+'Black   --> B (on block - jumpered)  G (Via G1 Bus in Lower Box)
+'Shield  --> Shield                   G (Via G1 Bus in Lower Box)
+'White   --> V (on block 1)            C1 (Via Lower NEMA)
+'Blue    --> V (on block 2)            C2 (Via Lower NEMA)
+
+'(Vibrating Wire Sensor to Transient Resistor to Signal Converter)
+'Sensor Blue --> Resistor Block 4
+'Sensor Red  --> Resistor Block 6
+'Resistor Block 3 --> Converter Block B
+'Resistor Block 5 --> Converter Block A
+
+'LUFFT WS100 DISDROMETER PRECIP (SDI-12 ADDRESS R)
+'Yellow  -->    SDI12 Signal (RS485B)    C5 (Via SDI-12 Bus 2)
+'Blue    -->    SDI-12 Ref G             G (Paired with Red - Via G1 Bus)
+'Red     -->    SDI-12 Ref G             G (Paired with Blue - Via G1 Bus)
+'White   -->    12/24V Pwr Gnd           G (Via 24V G3 Bus, G3, or Regulator 24V-)
+'Brown   -->    12/24V Power             24V (Via 24V Bus +, or Regulator 24V+)
+'Green   -->    RS485A                   Unused
+'Pink    -->    Not Connected            Unused
+'Grey    -->    Pulse Output             Unused
+
+
+'****************************************************************************************************************************************************
+'SDI-12 Addressing Guide
+'****************************************************************************************************************************************************
+
+'SDI 12 Address List
+'1 - SM#1 = (4")  - Stevens Hydrapobe #1
+'2 - SM#2 - (8")  - Stevens Hydrapobe #2
+'3 - SM#3 - (20") - Stevens Hydrapobe #3
+'4 -
+'5 - BP           - BaroVue10
+'6 - Net Rad      - Apogee SN500SS
+'7 - Snow Depth   - Sommer USH-9
+'8 - Snow Depth#2 - Sommer USH-9 (Continuous Operations Mode)
+'9 -
+'A - Net Rad#2    - Apogee SN500SS (Heated Operations)
+'B - SM#5         - (4")
+'C - SM#6         - (8")
+'D - SM#7         - (20")
+'E -
+'F -
+'G -
+'H
+'I
+'J
+'K
+'L
+'M
+'N
+'O
+'P
+'Q
+'R - Radar PCP  - Lufft WS100 Disrometer
+'S
+'T
+'U
+'V
+'W - Sonic Wind   - Lluft Ventus X
+'X
+'Y
+'Z
+
+
+
+
+'*****************************************************************************
+'Version Control
+'*****************************************************************************
+'Version 1.0.0. Deployed @ Snowbird on 8/09/2023.
+'Version 1.0.1. Minor. Slowed down the measurements to 60 seconds for SDI12 sensors on update. 10s was causing issues with SD and Solar.
+'Version 1.0.2. Minor. 20230905. Added the two Acclima sensors that were installed at the site.
+'Version 1.0.3. Minor. 20230912. Added code to measure 3 Stevens probes, 3 Acclima 305 sensors, and 3 acclima 310 sensors. Also added code so that either the 3.4m or 5.4m beaded stream cable will
+'onsite.
+'Version 1.0.4. Minor. 20231011. Divide the neutron counts by 10 since they can exceed 7999. This is an issue with the FP2 rules which limit values to +/-7999.
+'Version 1.0.5. Minor. 20231025. Moved the Sommer SD reading to 59 minutes (1 minute before the hour), noticed the reading is from previous hour. Believe this is because
+'of the time interval for the measurement (10s reading).
+'Verson 1.0.6. 20231121. Made slight tweaks to the ordering of SDI-12 sensor readings to optimize based on measurement duration. They all fire with no errors, or missed scans,
+'Version 2.0.0. IN-DEVELOPMENT. Integrated a time check for GOES which will automatically set the CR1000X clock if the drift is beyond a certain threshold. Refined the Beaded Stream process
+'and associated comm port open/close. Removed HydroInnova Snow Fox, Removed SCAN Acclima310 sensor. Added BaroVUE BP subroutine. Added Geolux LX80-S subroutine. Split the SDI-12 sensors between two COM ports to reduce potential conflict with slow responding
+'sensors. Added a second snow depth measurement at 58 minutes for the USH9 resample, and LX80-S measurement.
+'-Add Geonor Code to program.
+'-Add the Lluft Ventus Sonic Wind Vane
+'-Add table To collect more SD statistics
+'Version 3.0.0. IN DEVELOPMENT. Removed Geolux Radar Snow Depth. Added 2nd Sommer USH9 Sensor. Added 2nd Apogee SN500SS Net Radiometer. Added Ventus X Sonic Wind Vane. Finalized GeoNor code.
+'Version 3.0.1. 2025 Intitial Field Deployment. Programming modded to work with CR1000Xe datalogger with OS 8.2.1. Refined the functionality of the Net Rad Heater command code. Worked to better time the SDI-12 sensors so that there are no longer skipped scans
+'and NANs showing up in the array(s). All SDI12 sensors, aside from soils, use the C command vs M command. All SDI-12 sensors will fill arrays with NAN when the sensor has issues reading.
+'Version 3.1.0. 20250917. Added Lufft Ventus X Wind Sensor. 
+'Version 3.1.1. 20251118. Added WS100 Radar Precip Sensor. Enabled 24v system operations.
+'Version 3.1.2. 20251205. Added Joel's code to blank the UID upon startup when using a CR1000Xe with OS 8+. Unsure what this does with CR1000X with pre-OS8+. 
